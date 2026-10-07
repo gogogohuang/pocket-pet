@@ -8,9 +8,15 @@ export const MAX_X = WIDTH - SPRITE_W
 const JUMP = [1, 2, 3, 3, 2, 1, 0] // height per frame of a jump
 const SKY = 4 // rows above the ground
 
-export type Pose = 'type' | 'walk' | 'sit' | 'jump' | 'sleep' | 'groom' | 'stretch' | 'scratch' | 'yawn' | 'roll' | 'crouch' | 'spin'
+export type Pose = 'type' | 'read' | 'bash' | 'walk' | 'sit' | 'jump' | 'sleep' | 'groom' | 'stretch' | 'scratch' | 'yawn' | 'roll' | 'crouch' | 'spin'
 /** What Claude is doing right now, as the cat sees it. */
 export type Activity = 'idle' | 'working' | 'asking' | 'done' | 'failed'
+/** How the cat works, by the tool Claude is using. */
+export type WorkPose = 'type' | 'read' | 'bash'
+
+export const workPose = (tool: string): WorkPose =>
+  /^(Read|Grep|Glob|LS|WebFetch|WebSearch|ToolSearch)$/.test(tool) ? 'read' : /^(Bash|PowerShell|Monitor)$/.test(tool) ? 'bash' : 'type'
+
 export type Mood = 'sleeping' | 'starving' | 'dirty' | 'sad' | 'hungry' | 'happy'
 
 export type Anim = {
@@ -37,7 +43,7 @@ export const throwBall = (a: Anim, rand: () => number): Anim => ({
   t: 99,
 })
 
-export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity = 'idle'): Anim {
+export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity = 'idle', work: WorkPose = 'type'): Anim {
   const frame = a.frame + 1
   // Claude needs the person: even a sleeping cat wakes up and hops about
   // (done: the same hop, to celebrate)
@@ -51,7 +57,7 @@ export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity
   if (activity === 'failed') return { ...a, pose: 'sit', t: 3, ball: null, toy: 0, frame }
   if (activity === 'working') {
     if (a.pose === 'jump') return jumping({ ...a, frame })
-    return { ...a, pose: 'type', t: 3, ball: null, toy: 0, frame }
+    return { ...a, pose: work, t: 3, ball: null, toy: 0, frame }
   }
 
   // toy: run at the ball, pounce when close
@@ -138,6 +144,8 @@ function sprite(a: Anim, mood: Mood): string[] {
     return [pad(''), pad(' ,-.-. '), pad(` (${a.frame % 6 < 3 ? 'z' : 'Z'}_-_) `)]
   }
   const odd = a.frame % 2 === 1
+  if (a.pose === 'read') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [= =] ' : ' [=/=] ')]
+  if (a.pose === 'bash') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [$_#] ' : ' [#_$] ')]
   if (a.pose === 'type') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [#_#] ' : ' [_#_] ')]
   if (a.pose === 'stretch') return [pad('  ___  '), pad(' /   \\ '), pad(`U(${e})U`)]
   if (a.pose === 'scratch') return [pad(ears), pad(` (${e})${odd ? "'" : ' '}`), pad(odd ? ' U/_\\ ' : ' U\\_/ ')]

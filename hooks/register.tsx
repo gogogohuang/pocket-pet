@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
-import { initialAnim, scene, step, throwBall } from './anim'
+import { initialAnim, scene, step, throwBall, workPose } from './anim'
 import type { Activity, Anim } from './anim'
 import { clean, computePet, createPet, feed, play, rename, untilSleepChange } from './pet'
 import type { Mood, Outcome, PetRecord, PetView, Stage } from './pet'
@@ -71,11 +71,25 @@ const DOING: Record<Activity, string> = {
   failed: '⚠️ Claude 出錯了',
 }
 
+const ICON: Record<Activity, string> = { idle: '', working: '💻', asking: '❗', done: '✅', failed: '⚠️' }
+let lastSummary = ''
+let expiry: { cancel: () => void } | undefined
+
+/** The status line: Claude's activity (if any) in front of the cat's own summary. */
+function paintStatus($: EngineInterface) {
+  if (!lastSummary) return
+  const doing = activity === 'idle' ? '' : `${ICON[activity]}${activity === 'working' && lastTool ? ` ${lastTool}` : ''} `
+  $.ui.status(doing + lastSummary)
+}
+
 // Runs inside the model's tool loop, so it must never throw into it.
 async function setActivity($: EngineInterface, next: Activity, forMs = 0) {
   try {
     activity = next
     activityUntil = forMs ? (await $.clock.now()) + forMs : 0
+    expiry?.cancel()
+    expiry = forMs ? $.clock.after(forMs, () => { if (activity === next) void setActivity($, 'idle') }) : undefined
+    paintStatus($)
     $.ui.invalidate('ui.render')
   } catch {
     activityUntil = 0
@@ -88,7 +102,7 @@ let stopFrames: (() => void) | undefined
 async function frame($: EngineInterface) {
   const v = computePet(await load($), await $.clock.now())
   if (activityUntil && (await $.clock.now()) >= activityUntil) await setActivity($, 'idle')
-  anim = step(anim, v.mood, Math.random, activity)
+  anim = step(anim, v.mood, Math.random, activity, workPose(lastTool))
   $.ui.invalidate('ui.render')
 }
 
@@ -104,7 +118,8 @@ async function load($: EngineInterface): Promise<PetRecord> {
 async function refresh($: EngineInterface, announce: boolean) {
   const now = await $.clock.now()
   const v = computePet(await load($), now)
-  $.ui.status(summary(v))
+  lastSummary = summary(v)
+  paintStatus($)
   if (announce && v.mood !== lastMood) {
     if (v.mood === 'hungry' || v.mood === 'starving') $.ui.toast(`${v.name} 餓了!`)
     else if (v.mood === 'dirty') $.ui.toast(`${v.name} 的貓砂盆該清了`)

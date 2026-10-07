@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { MAX_X, WIDTH, initialAnim, scene, step, throwBall } from './anim'
+import { MAX_X, WIDTH, initialAnim, scene, step, throwBall, workPose } from './anim'
 import type { Activity, Anim } from './anim'
 
 const seeded = (seed = 1) => () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
@@ -74,4 +74,14 @@ test('a cat that sleeps ignores work and a finished turn', async () => {
 
 test('the mark floats above the cat', async () => {
   expect(scene(initialAnim(), 'happy', '!').join('\n')).toContain('!')
+})
+
+test('the cat works the way the tool does', async () => {
+  expect(workPose('Read')).toBe('read')
+  expect(workPose('Grep')).toBe('read')
+  expect(workPose('Bash')).toBe('bash')
+  expect(workPose('Edit')).toBe('type')
+  expect(workPose('mcp__x__y')).toBe('type')
+  const a = step(initialAnim(), 'happy', seeded(), 'working', 'bash')
+  expect(a.pose).toBe('bash')
 })

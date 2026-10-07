@@ -16,7 +16,21 @@ Answer `y` to add the marketplace, then pick a scope.
 
 - `/pet` opens the pane. Buttons: feed (`f`), play (`p`), clean (`c`).
 - `/pet name <name>` renames your cat.
-- The status line shows hunger, mood and mess; toasts tell you when it is hungry or awake.
+- The cat lives in a small room and moves on its own: it walks, jumps, grooms, stretches,
+  scratches, yawns, rolls over, crouches and pounces, chases its tail, and sleeps. Press play
+  and it chases a ball. A happy cat does more; a sad or starving one mostly sits.
+- The pane shows the clock and a countdown to bedtime (23:00) or wake-up (07:00).
+- The cat reacts to what Claude is doing:
+
+  | Claude is | The cat |
+  | --- | --- |
+  | working | sits at a keyboard (reads a book for Read/Grep/Glob/Web tools, types `$` for Bash) |
+  | waiting for your permission | hops with a `!` above its head, even if asleep |
+  | done with a turn | jumps with a `♥` for four seconds |
+  | interrupted or failed | sits with a `?` for four seconds |
+
+- The status line shows hunger, mood and mess, with Claude's activity in front of it
+  (`💻 Bash`, `❗`, `✅`, `⚠️`). Toasts tell you when the cat is hungry or awake.
 
 ## Develop
 
