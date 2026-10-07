@@ -1,13 +1,13 @@
 import { test, expect } from 'claude-code/testing'
 
 import { MAX_X, WIDTH, initialAnim, scene, step, throwBall } from './anim'
-import type { Anim } from './anim'
+import type { Activity, Anim } from './anim'
 
 const seeded = (seed = 1) => () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
 
-const run = (a: Anim, mood: Parameters<typeof step>[1], n: number, rand = seeded()) => {
+const run = (a: Anim, mood: Parameters<typeof step>[1], n: number, rand = seeded(), activity: Activity = 'idle') => {
   const seen: Anim[] = []
-  for (let i = 0; i < n; i++) seen.push((a = step(a, mood, rand)))
+  for (let i = 0; i < n; i++) seen.push((a = step(a, mood, rand, activity)))
 
   return seen
 }
@@ -55,4 +55,23 @@ test('a happy cat shows its full repertoire; a sad one only sits', async () => {
 test('a crouch ends in a pounce', async () => {
   const frames = run({ ...initialAnim(), pose: 'crouch', t: 2 }, 'happy', 6)
   expect(frames.some(f => f.pose === 'jump')).toBe(true)
+})
+
+test('while Claude works the cat types in place', async () => {
+  const frames = run(initialAnim(), 'happy', 40, seeded(), 'working').slice(5)
+  expect(frames.every(f => f.pose === 'type' && f.x === frames[0]!.x)).toBe(true)
+})
+
+test('when Claude asks, even a sleeping cat hops until answered', async () => {
+  const frames = run({ ...initialAnim(), pose: 'sleep' }, 'sleeping', 40, seeded(), 'asking')
+  expect(frames.filter(f => f.pose === 'jump').length).toBeGreaterThan(30)
+})
+
+test('a cat that sleeps ignores work and a finished turn', async () => {
+  for (const act of ['working', 'done', 'failed'] as const)
+    expect(run(initialAnim(), 'sleeping', 10, seeded(), act).every(f => f.pose === 'sleep')).toBe(true)
+})
+
+test('the mark floats above the cat', async () => {
+  expect(scene(initialAnim(), 'happy', '!').join('\n')).toContain('!')
 })

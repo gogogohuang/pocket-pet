@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import { initialAnim, scene, step, throwBall } from './anim'
-import type { Anim } from './anim'
+import type { Activity, Anim } from './anim'
 import { clean, computePet, createPet, feed, play, rename, untilSleepChange } from './pet'
 import type { Mood, Outcome, PetRecord, PetView, Stage } from './pet'
 
@@ -58,12 +58,37 @@ const summary = (v: PetView) =>
 
 let lastMood: Mood | undefined
 let anim: Anim = initialAnim()
+// What Claude is doing. `done` and `failed` are brief; the rest last until the next event.
+let activity: Activity = 'idle'
+let activityUntil = 0
+let lastTool = ''
+const MARK: Record<Activity, string> = { idle: '', working: '', asking: '!', done: '♥', failed: '?' }
+const DOING: Record<Activity, string> = {
+  idle: '',
+  working: '💻 Claude 工作中',
+  asking: '❗ Claude 在等你回應',
+  done: '✅ Claude 做完了',
+  failed: '⚠️ Claude 出錯了',
+}
+
+// Runs inside the model's tool loop, so it must never throw into it.
+async function setActivity($: EngineInterface, next: Activity, forMs = 0) {
+  try {
+    activity = next
+    activityUntil = forMs ? (await $.clock.now()) + forMs : 0
+    $.ui.invalidate('ui.render')
+  } catch {
+    activityUntil = 0
+  }
+}
+
 let stopFrames: (() => void) | undefined
 
 /** Advance the cat one frame and redraw; runs only while the pane is open. */
 async function frame($: EngineInterface) {
   const v = computePet(await load($), await $.clock.now())
-  anim = step(anim, v.mood, Math.random)
+  if (activityUntil && (await $.clock.now()) >= activityUntil) await setActivity($, 'idle')
+  anim = step(anim, v.mood, Math.random, activity)
   $.ui.invalidate('ui.render')
 }
 
@@ -122,6 +147,33 @@ export const register: Register = on => {
     return { text: '貓咪面板已開啟。' }
   })
 
+  on('turn.start', async ($, e, next) => {
+    lastTool = ''
+    await setActivity($, 'working')
+
+    return next(e)
+  })
+
+  on('tool.check', async ($, e, next) => {
+    const out = await next(e)
+    if (out.decision === 'ask') await setActivity($, 'asking')
+
+    return out
+  })
+
+  on('tool.call', async ($, e, next) => {
+    lastTool = e.tool
+    await setActivity($, 'working')
+
+    return next(e)
+  })
+
+  on('turn.complete', async ($, e, next) => {
+    await setActivity($, e.reason === 'answer' ? 'done' : 'failed', 4000)
+
+    return next(e)
+  })
+
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE) {
       stopFrames?.()
@@ -144,7 +196,7 @@ export const register: Register = on => {
           {v.name} · {v.stage === 'egg' ? '紙箱裡' : v.stage === 'baby' ? '幼貓' : '成貓'} · {age(v.ageMs)}
         </Text>
         <Box flexDirection="column" marginY={1}>
-          {(v.stage === 'egg' ? body(v.stage, v.mood) : scene(anim, v.mood)).map(line => (
+          {(v.stage === 'egg' ? body(v.stage, v.mood) : scene(anim, v.mood, MARK[activity])).map(line => (
             <Text>{line}</Text>
           ))}
           {v.mess > 0 && <Text>{'💩'.repeat(v.mess)}</Text>}
@@ -162,6 +214,7 @@ export const register: Register = on => {
           <Button key="play" label="玩耍 [p]" hotkey="p" onPress={() => act($, play)} />
           <Button key="clean" label="清理 [c]" hotkey="c" onPress={() => act($, clean)} />
         </Box>
+        <Text dimColor>{activity === 'idle' ? '' : `${DOING[activity]}${activity === 'working' && lastTool ? ` · ${lastTool}` : ''}`}</Text>
         <Text dimColor>{note || feedHint}</Text>
         <Text dimColor>{'指令:/pet 開面板 · /pet name <名字> 改名'}</Text>
       </Box>
