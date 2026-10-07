@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { clean, computePet, createPet, feed, isAsleepAt, play, weightedMs } from './pet'
+import { clean, computePet, createPet, feed, isAsleepAt, play, untilSleepChange, weightedMs } from './pet'
 
 const H = 3_600_000
 const at = (h: number, day = 1, min = 0) => new Date(2026, 0, day, h, min).getTime()
@@ -72,4 +72,11 @@ test('mood follows the worst need, sleep overriding', async () => {
   expect(computePet(p, at(9)).mood).toBe('happy')
   expect(computePet(p, at(2, 3)).mood).toBe('sleeping')
   expect(computePet(p, at(20, 2)).mood).toBe('starving')
+})
+
+test('countdown runs to 23:00 while awake and to 07:00 while asleep', async () => {
+  expect(untilSleepChange(at(21, 1, 30))).toBe(1.5 * H)
+  expect(untilSleepChange(at(6, 1, 30))).toBe(0.5 * H)
+  expect(untilSleepChange(at(23, 1, 0))).toBe(8 * H)
+  expect(untilSleepChange(at(7))).toBe(16 * H)
 })

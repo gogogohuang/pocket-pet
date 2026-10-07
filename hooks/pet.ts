@@ -48,6 +48,19 @@ export const isAsleepAt = (ms: number): boolean => {
   return hour >= 23 || hour < 7
 }
 
+/** Ms until the next sleep/wake boundary (23:00 or 07:00 local) after `ms`. */
+export const untilSleepChange = (ms: number): number => {
+  const d = new Date(ms)
+  const next = new Date(ms)
+  next.setMinutes(0, 0, 0)
+  const h = d.getHours()
+  if (h >= 23) { next.setDate(next.getDate() + 1); next.setHours(7) }
+  else if (h < 7) next.setHours(7)
+  else next.setHours(23)
+
+  return next.getTime() - ms
+}
+
 /** Time between `from` and `to`, sleeping hours counted at SLEEP_WEIGHT. */
 export const weightedMs = (from: number, to: number): number => {
   if (to <= from) return 0

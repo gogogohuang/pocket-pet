@@ -3,7 +3,7 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { initialAnim, scene, step, throwBall } from './anim'
 import type { Anim } from './anim'
-import { clean, computePet, createPet, feed, play, rename } from './pet'
+import { clean, computePet, createPet, feed, play, rename, untilSleepChange } from './pet'
 import type { Mood, Outcome, PetRecord, PetView, Stage } from './pet'
 
 const PANE = 'pocket-pet'
@@ -45,6 +45,12 @@ const clock = (ms: number) => {
   const p = (n: number) => String(n).padStart(2, '0')
 
   return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
+const span = (ms: number) => {
+  const m = Math.ceil(ms / 60_000)
+
+  return m >= 60 ? `${Math.floor(m / 60)} 小時 ${m % 60} 分` : `${m} 分`
 }
 
 const summary = (v: PetView) =>
@@ -148,12 +154,16 @@ export const register: Register = on => {
         <Text dimColor>
           🕐 {clock(now)} · {v.asleep ? '😴 睡覺中(23:00–07:00)' : '☀️ 清醒中'}
         </Text>
+        <Text dimColor>
+          {v.asleep ? '⏰ 距離睡醒' : '🌙 距離睡覺'} {span(untilSleepChange(now))}
+        </Text>
         <Box marginTop={1}>
-          <Button key="feed" label="餵食" hotkey="f" variant="primary" onPress={() => act($, feed)} />
-          <Button key="play" label="玩耍" hotkey="p" onPress={() => act($, play)} />
-          <Button key="clean" label="清理" hotkey="c" onPress={() => act($, clean)} />
+          <Button key="feed" label="餵食 [f]" hotkey="f" variant="primary" onPress={() => act($, feed)} />
+          <Button key="play" label="玩耍 [p]" hotkey="p" onPress={() => act($, play)} />
+          <Button key="clean" label="清理 [c]" hotkey="c" onPress={() => act($, clean)} />
         </Box>
         <Text dimColor>{note || feedHint}</Text>
+        <Text dimColor>{'指令:/pet 開面板 · /pet name <名字> 改名'}</Text>
       </Box>
     )
   })
