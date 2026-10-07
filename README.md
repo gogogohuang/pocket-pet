@@ -24,3 +24,14 @@ Answer `y` to add the marketplace, then pick a scope.
 claude plugin test .
 claude plugin validate .
 ```
+
+## Release
+
+```
+scripts/release.sh patch      # or minor, major, or an exact x.y.z
+scripts/release.sh patch --dry-run
+```
+
+Runs validate and tests, bumps the version in `.claude-plugin/plugin.json`, commits, tags `vX.Y.Z`,
+pushes, and creates a GitHub release. Nothing is published to npm; users update with
+`/plugin update pocket-pet`.
