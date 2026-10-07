@@ -1,13 +1,13 @@
 import { test, expect } from 'claude-code/testing'
 
 import { MAX_X, WIDTH, initialAnim, scene, step, throwBall, workPose } from './anim'
-import type { Activity, Anim } from './anim'
+import type { Activity, Anim, StepOptions } from './anim'
 
 const seeded = (seed = 1) => () => ((seed = (seed * 16807) % 2147483647) - 1) / 2147483646
 
-const run = (a: Anim, mood: Parameters<typeof step>[1], n: number, rand = seeded(), activity: Activity = 'idle') => {
+const run = (a: Anim, mood: Parameters<typeof step>[1], n: number, rand = seeded(), activity: Activity = 'idle', opts: StepOptions = {}) => {
   const seen: Anim[] = []
-  for (let i = 0; i < n; i++) seen.push((a = step(a, mood, rand, activity)))
+  for (let i = 0; i < n; i++) seen.push((a = step(a, mood, rand, activity, opts)))
 
   return seen
 }
@@ -82,6 +82,30 @@ test('the cat works the way the tool does', async () => {
   expect(workPose('Bash')).toBe('bash')
   expect(workPose('Edit')).toBe('type')
   expect(workPose('mcp__x__y')).toBe('type')
-  const a = step(initialAnim(), 'happy', seeded(), 'working', 'bash')
+  const a = step(initialAnim(), 'happy', seeded(), 'working', { work: 'bash' })
   expect(a.pose).toBe('bash')
+})
+
+test('Claude thinking, talking, compacting or startling the cat each get their own pose', async () => {
+  const want = { thinking: 'think', speaking: 'talk', compacting: 'loaf', startled: 'scared' } as const
+  for (const [act, pose] of Object.entries(want))
+    expect(run(initialAnim(), 'happy', 8, seeded(), act as Activity).slice(2).every(f => f.pose === pose)).toBe(true)
+})
+
+test('a long wait sends the cat to sleep, and it wakes when Claude does something', async () => {
+  const asleep = run(initialAnim(), 'happy', 4, seeded(), 'waiting')
+  expect(asleep.every(f => f.pose === 'sleep')).toBe(true)
+  expect(step(asleep[3]!, 'happy', seeded(), 'working').pose).not.toBe('sleep')
+})
+
+test('the cat perks up while the person types, only when otherwise idle', async () => {
+  const f = run(initialAnim(), 'happy', 6, seeded(), 'idle', { watching: true }).slice(1)
+  expect(f.every(x => x.pose === 'perk')).toBe(true)
+  expect(run(initialAnim(), 'happy', 6, seeded(), 'working', { watching: true }).slice(1).every(x => x.pose === 'type')).toBe(true)
+})
+
+test('each running subagent shows a little helper; the scene keeps its width', async () => {
+  const lines = scene(initialAnim(), 'happy', '', 2)
+  expect(lines.join('\n').match(/=\^[.o]\^=/g)?.length).toBe(2)
+  expect(lines.every(l => [...l].length === WIDTH)).toBe(true)
 })

@@ -8,9 +8,26 @@ export const MAX_X = WIDTH - SPRITE_W
 const JUMP = [1, 2, 3, 3, 2, 1, 0] // height per frame of a jump
 const SKY = 4 // rows above the ground
 
-export type Pose = 'type' | 'read' | 'bash' | 'walk' | 'sit' | 'jump' | 'sleep' | 'groom' | 'stretch' | 'scratch' | 'yawn' | 'roll' | 'crouch' | 'spin'
+export type Pose = 'type' | 'read' | 'bash' | 'think' | 'talk' | 'scared' | 'loaf' | 'perk' | 'walk' | 'sit' | 'jump' | 'sleep' | 'groom' | 'stretch' | 'scratch' | 'yawn' | 'roll' | 'crouch' | 'spin'
 /** What Claude is doing right now, as the cat sees it. */
-export type Activity = 'idle' | 'working' | 'asking' | 'done' | 'failed'
+export type Activity =
+  | 'idle'
+  | 'working'
+  | 'thinking'
+  | 'speaking'
+  | 'asking'
+  | 'done'
+  | 'failed'
+  | 'startled'
+  | 'compacting'
+  | 'waiting'
+
+export type StepOptions = {
+  /** How the cat works, by the tool Claude is using. */
+  work?: WorkPose
+  /** The person is typing a prompt. */
+  watching?: boolean
+}
 /** How the cat works, by the tool Claude is using. */
 export type WorkPose = 'type' | 'read' | 'bash'
 
@@ -43,7 +60,8 @@ export const throwBall = (a: Anim, rand: () => number): Anim => ({
   t: 99,
 })
 
-export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity = 'idle', work: WorkPose = 'type'): Anim {
+export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity = 'idle', opts: StepOptions = {}): Anim {
+  const { work = 'type', watching = false } = opts
   const frame = a.frame + 1
   // Claude needs the person: even a sleeping cat wakes up and hops about
   // (done: the same hop, to celebrate)
@@ -52,12 +70,22 @@ export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity
     return { ...a, pose: 'jump', t: 0, ball: null, toy: 0, frame }
   }
   if (mood === 'sleeping') return { ...a, pose: 'sleep', frame, ball: null, toy: 0, t: 0 }
+  // a long wait: the cat dozes off
+  if (activity === 'waiting') return { ...a, pose: 'sleep', ball: null, toy: 0, t: 0, frame }
   if (a.pose === 'sleep') return { ...a, pose: 'sit', frame, t: 4 } // just woke up
 
   if (activity === 'failed') return { ...a, pose: 'sit', t: 3, ball: null, toy: 0, frame }
-  if (activity === 'working') {
+  const busy: Partial<Record<Activity, Pose>> = {
+    working: work,
+    thinking: 'think',
+    speaking: 'talk',
+    startled: 'scared',
+    compacting: 'loaf',
+  }
+  const doing = busy[activity]
+  if (doing) {
     if (a.pose === 'jump') return jumping({ ...a, frame })
-    return { ...a, pose: work, t: 3, ball: null, toy: 0, frame }
+    return { ...a, pose: doing, t: 3, ball: null, toy: 0, frame }
   }
 
   // toy: run at the ball, pounce when close
@@ -75,6 +103,9 @@ export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity
   }
 
   if (a.pose === 'jump') return jumping({ ...a, frame })
+
+  // the person is typing: ears up, eyes on them
+  if (watching) return { ...a, pose: 'perk', t: 2, frame }
 
   if (a.t > 0) {
     if (a.pose === 'walk') {
@@ -144,6 +175,14 @@ function sprite(a: Anim, mood: Mood): string[] {
     return [pad(''), pad(' ,-.-. '), pad(` (${a.frame % 6 < 3 ? 'z' : 'Z'}_-_) `)]
   }
   const odd = a.frame % 2 === 1
+  if (a.pose === 'think') {
+    const tilt = odd ? ' ' : ''
+    return [pad(tilt + ears.trim()), pad(tilt + `(${e})`), pad(' U U ')]
+  }
+  if (a.pose === 'talk') return [pad(ears), pad(` (${odd ? '^o^' : '^.^'}) `), pad(' U U ')]
+  if (a.pose === 'scared') return [pad(' /|_|\\ '), pad(' (>O<) '), pad(odd ? '/U U\\' : ' U U  ')]
+  if (a.pose === 'loaf') return [pad(''), pad(' ,---, '), pad('(=-.-=)')]
+  if (a.pose === 'perk') return [pad(' /|_|\\ '), pad(' (O.O) '), pad(' U U ')]
   if (a.pose === 'read') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [= =] ' : ' [=/=] ')]
   if (a.pose === 'bash') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [$_#] ' : ' [#_$] ')]
   if (a.pose === 'type') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [#_#] ' : ' [_#_] ')]
@@ -159,11 +198,13 @@ function sprite(a: Anim, mood: Mood): string[] {
 
 /** The arena: SKY + 3 rows of cat room, then a ground line. */
 /** `mark` floats above the cat's head: '!' when Claude asks, '♥' when done. */
-export function scene(a: Anim, mood: Mood, mark = ''): string[] {
+export function scene(a: Anim, mood: Mood, mark = '', kittens = 0): string[] {
   const rows = Array.from({ length: SKY + 3 }, () => ' '.repeat(WIDTH).split(''))
   const put = (r: number, c: number, s: string) => {
     for (let i = 0; i < s.length; i++) if (c + i >= 0 && c + i < WIDTH && r >= 0 && r < rows.length) rows[r]![c + i] = s[i]!
   }
+  // one little helper per running subagent, waving from the right-hand side
+  for (let i = 0; i < Math.min(kittens, 3); i++) put(SKY + 2, WIDTH - 6 - i * 7, (a.frame + i) % 2 ? '=^.^=' : '=^o^=')
   const h = height(a)
   const top = SKY - h
   sprite(a, mood).forEach((line, i) => put(top + i, a.x, line))

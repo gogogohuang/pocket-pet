@@ -58,20 +58,60 @@ const summary = (v: PetView) =>
 
 let lastMood: Mood | undefined
 let anim: Anim = initialAnim()
-// What Claude is doing. `done` and `failed` are brief; the rest last until the next event.
+// What Claude is doing. `done`, `failed` and `startled` are brief; the rest last until the next event.
 let activity: Activity = 'idle'
+let shown: Activity = 'idle' // `activity`, or `waiting` once it has gone on for a long time
 let activityUntil = 0
+let activityId = 0
+let seenId = -1
+let seenAt = 0
+let inTurn = false
+let kittens = 0 // subagents running right now
 let lastTool = ''
-const MARK: Record<Activity, string> = { idle: '', working: '', asking: '!', done: '♥', failed: '?' }
+let lastTokens = 0
+let frames = 0
+let typingFrame = -100 // the frame on which the person last edited the prompt
+const WAIT_MS = 120_000
+
+const MARK: Record<Activity, string> = {
+  idle: '',
+  working: '',
+  thinking: '…',
+  speaking: '',
+  asking: '!',
+  done: '♥',
+  failed: '?',
+  startled: '*',
+  compacting: '…',
+  waiting: '',
+}
 const DOING: Record<Activity, string> = {
   idle: '',
   working: '💻 Claude 工作中',
+  thinking: '🤔 Claude 思考中',
+  speaking: '💬 Claude 正在回答',
   asking: '❗ Claude 在等你回應',
   done: '✅ Claude 做完了',
   failed: '⚠️ Claude 出錯了',
+  startled: '😱 工具失敗了',
+  compacting: '📦 Claude 在整理對話',
+  waiting: '💤 等好久了',
+}
+const ICON: Record<Activity, string> = {
+  idle: '',
+  working: '💻',
+  thinking: '🤔',
+  speaking: '💬',
+  asking: '❗',
+  done: '✅',
+  failed: '⚠️',
+  startled: '😱',
+  compacting: '📦',
+  waiting: '💤',
 }
 
-const ICON: Record<Activity, string> = { idle: '', working: '💻', asking: '❗', done: '✅', failed: '⚠️' }
+const tokens = (n: number) => (n >= 1000 ? `${(n / 1000).toFixed(1)}k` : `${n}`)
+
 let lastSummary = ''
 let expiry: { cancel: () => void } | undefined
 
@@ -82,13 +122,22 @@ function paintStatus($: EngineInterface) {
   $.ui.status(doing + lastSummary)
 }
 
-// Runs inside the model's tool loop, so it must never throw into it.
+/** Where a brief state ends up: back to work if a turn is still running. */
+const settled = (): Activity => (inTurn ? 'working' : 'idle')
+
+// These run inside the model's loop, so none of them may throw into it.
 async function setActivity($: EngineInterface, next: Activity, forMs = 0) {
   try {
     activity = next
+    shown = next
+    activityId++
     activityUntil = forMs ? (await $.clock.now()) + forMs : 0
     expiry?.cancel()
-    expiry = forMs ? $.clock.after(forMs, () => { if (activity === next) void setActivity($, 'idle') }) : undefined
+    expiry = forMs
+      ? $.clock.after(forMs, () => {
+          if (activity === next) void setActivity($, settled())
+        })
+      : undefined
     paintStatus($)
     $.ui.invalidate('ui.render')
   } catch {
@@ -96,13 +145,21 @@ async function setActivity($: EngineInterface, next: Activity, forMs = 0) {
   }
 }
 
-let stopFrames: (() => void) | undefined
+let frameTimer: { cancel: () => void } | undefined
 
 /** Advance the cat one frame and redraw; runs only while the pane is open. */
 async function frame($: EngineInterface) {
-  const v = computePet(await load($), await $.clock.now())
-  if (activityUntil && (await $.clock.now()) >= activityUntil) await setActivity($, 'idle')
-  anim = step(anim, v.mood, Math.random, activity, workPose(lastTool))
+  const now = await $.clock.now()
+  const v = computePet(await load($), now)
+  frames++
+  if (activityUntil && now >= activityUntil) await setActivity($, settled())
+  if (activityId !== seenId) {
+    seenId = activityId
+    seenAt = now
+  }
+  const long = (activity === 'working' || activity === 'thinking' || activity === 'speaking') && now - seenAt > WAIT_MS
+  shown = long ? 'waiting' : activity
+  anim = step(anim, v.mood, Math.random, shown, { work: workPose(lastTool), watching: frames - typingFrame <= 4 })
   $.ui.invalidate('ui.render')
 }
 
@@ -139,6 +196,15 @@ async function act($: EngineInterface, run: (r: PetRecord, now: number) => Outco
 }
 
 
+const doingLine = () => {
+  if (shown === 'idle') return ''
+  const extra =
+    shown === 'working' && lastTool ? ` · ${lastTool}` : shown === 'done' && lastTokens ? ` · ${tokens(lastTokens)} tokens` : ''
+  const helpers = kittens ? ` · 🐱×${kittens} 小幫手` : ''
+
+  return DOING[shown] + extra + helpers
+}
+
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
     await $.command.register({ name: 'pet', description: '養貓:/pet 開面板,/pet name <名字> 改名' })
@@ -157,16 +223,37 @@ export const register: Register = on => {
       return { text: `改名完成:${name.trim().slice(0, 12)}` }
     }
     await $.ui.open({ id: PANE, title: 'Pet' })
-    stopFrames ??= $.clock.every(FRAME_MS, () => frame($))
+    frameTimer ??= $.clock.every(FRAME_MS, () => frame($))
 
     return { text: '貓咪面板已開啟。' }
   })
 
   on('turn.start', async ($, e, next) => {
     lastTool = ''
+    inTurn = true
     await setActivity($, 'working')
 
     return next(e)
+  })
+
+  // The response arriving in pieces: thinking, then the answer. Only the main loop's.
+  on('turn.step', async function* ($, e, next) {
+    const stream = next(e)
+    let kind = ''
+    while (true) {
+      const part = await stream.next()
+      if (part.done) return part.value
+      try {
+        const c = part.value
+        if (!e.agentId && c.kind !== kind && (c.kind === 'thinking' || c.kind === 'text')) {
+          kind = c.kind
+          if (activity !== 'asking') void setActivity($, c.kind === 'thinking' ? 'thinking' : 'speaking')
+        }
+      } catch {
+        // the cat must never break the stream
+      }
+      yield part.value
+    }
   })
 
   on('tool.check', async ($, e, next) => {
@@ -178,21 +265,61 @@ export const register: Register = on => {
 
   on('tool.call', async ($, e, next) => {
     lastTool = e.tool
+    const helper = /^(Agent|Task)$/.test(e.tool)
+    if (helper) kittens++
     await setActivity($, 'working')
+    try {
+      const out = await next(e)
+      if ('isError' in out && out.isError) await setActivity($, 'startled', 2500)
+
+      return out
+    } finally {
+      if (helper) kittens = Math.max(0, kittens - 1)
+    }
+  })
+
+  on('session.compact', async ($, e, next) => {
+    await setActivity($, 'compacting')
+    try {
+      return await next(e)
+    } finally {
+      if (activity === 'compacting') await setActivity($, settled())
+    }
+  })
+
+  // The person typing: just a note of the frame; no await on the keystroke path.
+  on('prompt.edit', ($, e, next) => {
+    typingFrame = frames
 
     return next(e)
   })
 
   on('turn.complete', async ($, e, next) => {
-    await setActivity($, e.reason === 'answer' ? 'done' : 'failed', 4000)
+    if (!e.agentId) {
+      inTurn = false
+      kittens = 0
+      lastTokens = e.usage?.output_tokens ?? 0
+      await setActivity($, e.reason === 'answer' ? 'done' : 'failed', 4000)
+    }
+
+    return next(e)
+  })
+
+  on('session.end', async ($, e, next) => {
+    try {
+      const v = computePet(await load($), await $.clock.now())
+      $.ui.toast(`${v.name} 揮手說掰掰 👋`)
+    } catch {
+      // closing anyway
+    }
 
     return next(e)
   })
 
   on('ui.close', async ($, e, next) => {
     if (e.id === PANE) {
-      stopFrames?.()
-      stopFrames = undefined
+      frameTimer?.cancel()
+      frameTimer = undefined
     }
 
     return next(e)
@@ -211,7 +338,7 @@ export const register: Register = on => {
           {v.name} · {v.stage === 'egg' ? '紙箱裡' : v.stage === 'baby' ? '幼貓' : '成貓'} · {age(v.ageMs)}
         </Text>
         <Box flexDirection="column" marginY={1}>
-          {(v.stage === 'egg' ? body(v.stage, v.mood) : scene(anim, v.mood, MARK[activity])).map(line => (
+          {(v.stage === 'egg' ? body(v.stage, v.mood) : scene(anim, v.mood, MARK[shown], kittens)).map(line => (
             <Text>{line}</Text>
           ))}
           {v.mess > 0 && <Text>{'💩'.repeat(v.mess)}</Text>}
@@ -229,7 +356,7 @@ export const register: Register = on => {
           <Button key="play" label="玩耍 [p]" hotkey="p" onPress={() => act($, play)} />
           <Button key="clean" label="清理 [c]" hotkey="c" onPress={() => act($, clean)} />
         </Box>
-        <Text dimColor>{activity === 'idle' ? '' : `${DOING[activity]}${activity === 'working' && lastTool ? ` · ${lastTool}` : ''}`}</Text>
+        <Text dimColor>{doingLine()}</Text>
         <Text dimColor>{note || feedHint}</Text>
         <Text dimColor>{'指令:/pet 開面板 · /pet name <名字> 改名'}</Text>
       </Box>

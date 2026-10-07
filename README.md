@@ -24,13 +24,22 @@ Answer `y` to add the marketplace, then pick a scope.
 
   | Claude is | The cat |
   | --- | --- |
-  | working | sits at a keyboard (reads a book for Read/Grep/Glob/Web tools, types `$` for Bash) |
+  | thinking | tilts its head, `…` above it |
+  | writing the answer | talks |
+  | running a tool | sits at a keyboard (reads a book for Read/Grep/Glob/Web tools, types `$` for Bash) |
+  | running subagents | a small helper cat appears per subagent (up to three) |
   | waiting for your permission | hops with a `!` above its head, even if asleep |
-  | done with a turn | jumps with a `♥` for four seconds |
+  | a tool failed | fur on end for a moment |
+  | compacting the conversation | curls up into a loaf |
+  | done with a turn | jumps with a `♥` for four seconds; the pane shows the output token count |
   | interrupted or failed | sits with a `?` for four seconds |
+  | busy for over two minutes | dozes off |
+  | you are typing a prompt | ears up, eyes on you |
+
+  A toast waves goodbye when the session ends.
 
 - The status line shows hunger, mood and mess, with Claude's activity in front of it
-  (`💻 Bash`, `❗`, `✅`, `⚠️`). Toasts tell you when the cat is hungry or awake.
+  (`💻 Bash`, `🤔`, `💬`, `❗`, `✅`, `⚠️`). Toasts tell you when the cat is hungry or awake.
 
 ## Develop
 
