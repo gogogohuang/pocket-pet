@@ -1,12 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
+import { initialAnim, scene, step, throwBall } from './anim'
+import type { Anim } from './anim'
 import { clean, computePet, createPet, feed, play, rename } from './pet'
 import type { Mood, Outcome, PetRecord, PetView, Stage } from './pet'
 
 const PANE = 'pocket-pet'
 const KEY = 'pet'
 const TICK_MS = 60_000
+const FRAME_MS = 400
 
 const msg = atom({ plugin: 'pocket-pet', key: 'msg' } as const, '')
 
@@ -41,6 +44,15 @@ const summary = (v: PetView) =>
   `${v.stage === 'egg' ? '📦' : v.asleep ? '😴' : v.mood === 'happy' ? '😺' : v.mood === 'sad' || v.mood === 'starving' ? '😿' : '🐱'} ${bar(5 - v.hunger, '🍙', '·')} ${bar(v.happiness, '♥', '♡')}${v.mess ? ' 💩'.repeat(v.mess) : ''}`
 
 let lastMood: Mood | undefined
+let anim: Anim = initialAnim()
+let stopFrames: (() => void) | undefined
+
+/** Advance the cat one frame and redraw; runs only while the pane is open. */
+async function frame($: EngineInterface) {
+  const v = computePet(await load($), await $.clock.now())
+  anim = step(anim, v.mood, Math.random)
+  $.ui.invalidate('ui.render')
+}
 
 async function load($: EngineInterface): Promise<PetRecord> {
   const stored = (await $.store.get(KEY)) as PetRecord | undefined
@@ -69,6 +81,7 @@ async function act($: EngineInterface, run: (r: PetRecord, now: number) => Outco
   const out = run(await load($), now)
   await $.store.set(KEY, out.record)
   await update($, msg, () => out.message)
+  if (run === play && out.ok) anim = throwBall(anim, Math.random)
   await refresh($, false)
 }
 
@@ -91,8 +104,18 @@ export const register: Register = on => {
       return { text: `改名完成:${name.trim().slice(0, 12)}` }
     }
     await $.ui.open({ id: PANE, title: 'Pet' })
+    stopFrames ??= $.clock.every(FRAME_MS, () => frame($))
 
     return { text: '貓咪面板已開啟。' }
+  })
+
+  on('ui.close', async ($, e, next) => {
+    if (e.id === PANE) {
+      stopFrames?.()
+      stopFrames = undefined
+    }
+
+    return next(e)
   })
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
@@ -107,7 +130,7 @@ export const register: Register = on => {
           {v.name} · {v.stage === 'egg' ? '紙箱裡' : v.stage === 'baby' ? '幼貓' : '成貓'} · {age(v.ageMs)}
         </Text>
         <Box flexDirection="column" marginY={1}>
-          {body(v.stage, v.mood).map(line => (
+          {(v.stage === 'egg' ? body(v.stage, v.mood) : scene(anim, v.mood)).map(line => (
             <Text>{line}</Text>
           ))}
           {v.mess > 0 && <Text>{'💩'.repeat(v.mess)}</Text>}
