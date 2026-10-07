@@ -1,3 +1,6 @@
+import { personalityOf } from './personality'
+import type { PersonalityId } from './personality'
+
 // Pure pet logic. The pet is stored as timestamps and meters, never as
 // "current" values; computePet(record, now) derives how it is right now, so
 // the time a session was closed is accounted for on the next open.
@@ -22,6 +25,8 @@ export type PetRecord = {
   bored: Meter
   /** When each unclean spot appears; those at or before now are mess. */
   poopAt: number[]
+  /** Absent means 'normal'. */
+  personality?: PersonalityId
 }
 
 export type Stage = 'egg' | 'baby' | 'adult'
@@ -78,8 +83,9 @@ export const weightedMs = (from: number, to: number): number => {
   return sum
 }
 
-const meterNow = (m: Meter, unit: number, now: number): number =>
-  Math.min(MAX_LEVEL * unit, m.ms + weightedMs(m.at, now))
+/** `rate` scales the time added since the meter was last touched, not the meter's unit. */
+const meterNow = (m: Meter, unit: number, now: number, rate = 1): number =>
+  Math.min(MAX_LEVEL * unit, m.ms + weightedMs(m.at, now) * rate)
 
 const stageAt = (age: number): Stage =>
   age < EGG_MS ? 'egg' : age < BABY_MS ? 'baby' : 'adult'
@@ -95,8 +101,8 @@ export const createPet = (now: number, name = '小貓'): PetRecord => ({
 export const computePet = (rec: PetRecord, now: number): PetView => {
   const ageMs = Math.max(0, now - rec.bornAt)
   const stage = stageAt(ageMs)
-  const hunger = Math.min(MAX_LEVEL, Math.floor(meterNow(rec.hunger, HUNGER_UNIT, now) / HUNGER_UNIT))
-  const bored = Math.min(MAX_LEVEL, Math.floor(meterNow(rec.bored, BORED_UNIT, now) / BORED_UNIT))
+  const hunger = Math.min(MAX_LEVEL, Math.floor(meterNow(rec.hunger, HUNGER_UNIT, now, personalityOf(rec).hungerRate) / HUNGER_UNIT))
+  const bored = Math.min(MAX_LEVEL, Math.floor(meterNow(rec.bored, BORED_UNIT, now, personalityOf(rec).boredRate) / BORED_UNIT))
   const happiness = MAX_LEVEL - bored
   const mess = rec.poopAt.filter(t => t <= now).length
   const asleep = stage !== 'egg' && isAsleepAt(now)
@@ -115,8 +121,8 @@ export const computePet = (rec: PetRecord, now: number): PetView => {
   return { name: rec.name, stage, hunger, happiness, mess, asleep, mood, ageMs }
 }
 
-const reduce = (m: Meter, unit: number, levels: number, now: number): Meter => ({
-  ms: Math.max(0, meterNow(m, unit, now) - levels * unit),
+const reduce = (m: Meter, unit: number, levels: number, now: number, rate = 1): Meter => ({
+  ms: Math.max(0, meterNow(m, unit, now, rate) - levels * unit),
   at: now,
 })
 
@@ -130,10 +136,10 @@ export const feed = (rec: PetRecord, now: number): Outcome => {
 
   return {
     ok: true,
-    message: `${v.name} 呼嚕呼嚕地吃光了!`,
+    message: personalityOf(rec).lines.fed(v.name),
     record: {
       ...rec,
-      hunger: reduce(rec.hunger, HUNGER_UNIT, 3, now),
+      hunger: reduce(rec.hunger, HUNGER_UNIT, 3, now, personalityOf(rec).hungerRate),
       poopAt: [...rec.poopAt, now + POOP_DELAY],
     },
   }
@@ -146,15 +152,15 @@ export const play = (rec: PetRecord, now: number): Outcome => {
     return {
       ok: false,
       message: `${v.name} 被吵醒了,不太開心……`,
-      record: { ...rec, bored: { ms: meterNow(rec.bored, BORED_UNIT, now) + BORED_UNIT, at: now } },
+      record: { ...rec, bored: { ms: meterNow(rec.bored, BORED_UNIT, now, personalityOf(rec).boredRate) + BORED_UNIT, at: now } },
     }
   }
   if (v.hunger >= 4) return refuse(rec, `${v.name} 太餓了,沒力氣玩。`)
 
   return {
     ok: true,
-    message: `${v.name} 追著逗貓棒跑,好開心!`,
-    record: { ...rec, bored: reduce(rec.bored, BORED_UNIT, 3, now) },
+    message: personalityOf(rec).lines.played(v.name),
+    record: { ...rec, bored: reduce(rec.bored, BORED_UNIT, 3, now, personalityOf(rec).boredRate) },
   }
 }
 
@@ -164,7 +170,7 @@ export const clean = (rec: PetRecord, now: number): Outcome => {
 
   return {
     ok: true,
-    message: '貓砂盆清乾淨了 ✨',
+    message: personalityOf(rec).lines.cleaned(rec.name),
     record: { ...rec, poopAt: rec.poopAt.filter(t => t > now) },
   }
 }
@@ -173,3 +179,18 @@ export const rename = (rec: PetRecord, name: string): PetRecord => ({
   ...rec,
   name: name.trim().slice(0, 12) || rec.name,
 })
+
+/**
+ * Changes the personality. Both meters are brought up to `now` at the old rates first,
+ * so the time since they were last touched is not re-priced at the new ones.
+ */
+export const setPersonality = (rec: PetRecord, id: PersonalityId, now: number): PetRecord => {
+  const old = personalityOf(rec)
+
+  return {
+    ...rec,
+    hunger: { ms: meterNow(rec.hunger, HUNGER_UNIT, now, old.hungerRate), at: now },
+    bored: { ms: meterNow(rec.bored, BORED_UNIT, now, old.boredRate), at: now },
+    personality: id,
+  }
+}

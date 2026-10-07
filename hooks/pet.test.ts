@@ -1,6 +1,6 @@
 import { test, expect } from 'claude-code/testing'
 
-import { clean, computePet, createPet, feed, isAsleepAt, play, untilSleepChange, weightedMs } from './pet'
+import { clean, computePet, createPet, feed, isAsleepAt, play, setPersonality, untilSleepChange, weightedMs } from './pet'
 
 const H = 3_600_000
 const at = (h: number, day = 1, min = 0) => new Date(2026, 0, day, h, min).getTime()
@@ -79,4 +79,32 @@ test('countdown runs to 23:00 while awake and to 07:00 while asleep', async () =
   expect(untilSleepChange(at(6, 1, 30))).toBe(0.5 * H)
   expect(untilSleepChange(at(23, 1, 0))).toBe(8 * H)
   expect(untilSleepChange(at(7))).toBe(16 * H)
+})
+
+test('a higher hunger rate means a hungrier cat; normal is unchanged', async () => {
+  const born = at(8)
+  const hungry = (id: 'normal' | 'lazy' | 'playful') => ({ ...createPet(born), personality: id })
+  const later = at(8) + 14 * H // 14 awake hours: 3 levels at normal
+  expect(computePet(createPet(born), later).hunger).toBe(3)
+  expect(computePet(hungry('normal'), later).hunger).toBe(3)
+  expect(computePet(hungry('lazy'), later).hunger).toBeLessThan(3)
+  expect(computePet(hungry('playful'), later).hunger).toBeGreaterThan(3)
+})
+
+test('switching personality leaves both meter levels where they were', async () => {
+  const born = at(8)
+  const rec = { ...createPet(born), personality: 'playful' as const }
+  const now = at(8) + 10 * H
+  const before = computePet(rec, now)
+  const after = computePet(setPersonality(rec, 'lazy', now), now)
+  expect([after.hunger, after.happiness]).toEqual([before.hunger, before.happiness])
+  expect(setPersonality(rec, 'lazy', now).personality).toBe('lazy')
+})
+
+test('feeding speaks in the cat\'s own voice', async () => {
+  const born = at(8)
+  const rec = { ...createPet(born), personality: 'aloof' as const }
+  const out = feed(rec, at(8) + 14 * H)
+  expect(out.ok).toBe(true)
+  expect(out.message).toContain('才不是因為好吃')
 })

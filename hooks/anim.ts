@@ -2,6 +2,9 @@
 // draws the arena as lines of text. No clock, no randomness of its own: the
 // caller passes `rand`, so tests are deterministic.
 
+import { DEFAULT_PERSONALITY } from './personality'
+import type { Personality } from './personality'
+
 export const WIDTH = 30
 export const SPRITE_W = 7
 export const MAX_X = WIDTH - SPRITE_W
@@ -27,6 +30,7 @@ export type StepOptions = {
   work?: WorkPose
   /** The person is typing a prompt. */
   watching?: boolean
+  personality?: Personality
 }
 /** How the cat works, by the tool Claude is using. */
 export type WorkPose = 'type' | 'read' | 'bash'
@@ -61,7 +65,7 @@ export const throwBall = (a: Anim, rand: () => number): Anim => ({
 })
 
 export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity = 'idle', opts: StepOptions = {}): Anim {
-  const { work = 'type', watching = false } = opts
+  const { work = 'type', watching = false, personality: p = DEFAULT_PERSONALITY } = opts
   const frame = a.frame + 1
   // Claude needs the person: even a sleeping cat wakes up and hops about
   // (done: the same hop, to celebrate)
@@ -109,7 +113,7 @@ export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity
 
   if (a.t > 0) {
     if (a.pose === 'walk') {
-      let x = a.x + a.dir
+      let x = frame % p.skip === 0 ? a.x + a.dir * p.stride : a.x
       let dir = a.dir
       if (x <= 0 || x >= MAX_X) {
         dir = (dir * -1) as 1 | -1
@@ -129,15 +133,30 @@ export function step(a: Anim, mood: Mood, rand: () => number, activity: Activity
   const happy = mood === 'happy'
   const rest = (pose: Pose, t: number): Anim => ({ ...a, pose, t, frame })
   if (mood === 'sad' || mood === 'starving') return rest('sit', 8)
-  if (r < 0.3) return { ...a, pose: 'walk', dir: rand() < 0.5 ? 1 : -1, t: 6 + Math.floor(rand() * 10), frame }
-  if (r < 0.4) return happy ? { ...a, pose: 'jump', t: 0, frame } : rest('sit', 5)
-  if (r < 0.5) return rest('groom', 6)
-  if (r < 0.58) return rest('stretch', 8)
-  if (r < 0.66) return rest('scratch', 8)
-  if (r < 0.74) return rest('yawn', 6)
-  if (r < 0.8) return happy ? rest('roll', 10) : rest('sit', 5)
-  if (r < 0.86) return happy ? rest('crouch', 6) : rest('sit', 5)
-  if (r < 0.92) return happy ? rest('spin', 12) : rest('sit', 5)
+  const w = p.weights
+  const total = w.walk + w.jump + w.groom + w.stretch + w.scratch + w.yawn + w.roll + w.crouch + w.spin + w.sit
+  const pick = r * total
+  let edge = w.walk
+  if (pick < edge) {
+    if (p.centered) {
+      // a clingy cat heads for the middle and only potters about once it is there
+      const dist = Math.abs(MAX_X / 2 - a.x)
+      const far = dist > 3
+      const dir = far ? (a.x < MAX_X / 2 ? 1 : -1) : rand() < 0.5 ? 1 : -1
+      const t = far ? Math.max(2, Math.ceil(dist / p.stride) + Math.floor(rand() * 3) - 1) : 2 + Math.floor(rand() * 3)
+      return { ...a, pose: 'walk', dir: dir as 1 | -1, t, frame }
+    }
+    const dir = rand() < 0.5 ? 1 : -1
+    return { ...a, pose: 'walk', dir: dir as 1 | -1, t: 6 + Math.floor(rand() * 10), frame }
+  }
+  if (pick < (edge += w.jump)) return happy ? { ...a, pose: 'jump', t: 0, frame } : rest('sit', 5)
+  if (pick < (edge += w.groom)) return rest('groom', 6)
+  if (pick < (edge += w.stretch)) return rest('stretch', 8)
+  if (pick < (edge += w.scratch)) return rest('scratch', 8)
+  if (pick < (edge += w.yawn)) return rest('yawn', 6)
+  if (pick < (edge += w.roll)) return happy ? rest('roll', 10) : rest('sit', 5)
+  if (pick < (edge += w.crouch)) return happy ? rest('crouch', 6) : rest('sit', 5)
+  if (pick < (edge += w.spin)) return happy ? rest('spin', 12) : rest('sit', 5)
   return rest('sit', 5 + Math.floor(rand() * 5))
 }
 

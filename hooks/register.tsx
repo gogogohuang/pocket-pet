@@ -3,8 +3,10 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { initialAnim, scene, step, throwBall, workPose } from './anim'
 import type { Activity, Anim } from './anim'
-import { clean, computePet, createPet, feed, play, rename, untilSleepChange } from './pet'
+import { clean, computePet, createPet, feed, play, rename, setPersonality, untilSleepChange } from './pet'
 import type { Mood, Outcome, PetRecord, PetView, Stage } from './pet'
+import { DEFAULT_PERSONALITY, listPersonalities, parsePersonality, personalityOf } from './personality'
+import type { Personality } from './personality'
 
 const PANE = 'pocket-pet'
 const KEY = 'pet'
@@ -71,7 +73,9 @@ let lastTool = ''
 let lastTokens = 0
 let frames = 0
 let typingFrame = -100 // the frame on which the person last edited the prompt
-const WAIT_MS = 120_000
+let current: Personality = DEFAULT_PERSONALITY // the cat's personality as of the last load
+let changedFrame = 0 // the frame on which what Claude is doing last changed
+let beforeChange: Activity = 'idle'
 
 const MARK: Record<Activity, string> = {
   idle: '',
@@ -128,6 +132,7 @@ const settled = (): Activity => (inTurn ? 'working' : 'idle')
 // These run inside the model's loop, so none of them may throw into it.
 async function setActivity($: EngineInterface, next: Activity, forMs = 0) {
   try {
+    beforeChange = shown
     activity = next
     shown = next
     activityId++
@@ -153,19 +158,31 @@ async function frame($: EngineInterface) {
   const v = computePet(await load($), now)
   frames++
   if (activityUntil && now >= activityUntil) await setActivity($, settled())
+  const p = current
   if (activityId !== seenId) {
     seenId = activityId
     seenAt = now
+    changedFrame = frames
   }
-  const long = (activity === 'working' || activity === 'thinking' || activity === 'speaking') && now - seenAt > WAIT_MS
+  const long = (activity === 'working' || activity === 'thinking' || activity === 'speaking') && now - seenAt > p.dozeAfterMs
   shown = long ? 'waiting' : activity
-  anim = step(anim, v.mood, Math.random, shown, { work: workPose(lastTool), watching: frames - typingFrame <= 4 })
+  // a cat with lag notices a change in what Claude is doing a few frames late
+  const seen = frames - changedFrame < p.lagFrames ? beforeChange : shown
+  anim = step(anim, v.mood, Math.random, seen, {
+    work: workPose(lastTool),
+    watching: p.watchFrames > 0 && frames - typingFrame <= p.watchFrames,
+    personality: p,
+  })
   $.ui.invalidate('ui.render')
 }
 
 async function load($: EngineInterface): Promise<PetRecord> {
   const stored = (await $.store.get(KEY)) as PetRecord | undefined
-  if (stored) return stored
+  if (stored) {
+    current = personalityOf(stored)
+
+    return stored
+  }
   const fresh = createPet(await $.clock.now())
   await $.store.set(KEY, fresh)
 
@@ -178,9 +195,9 @@ async function refresh($: EngineInterface, announce: boolean) {
   lastSummary = summary(v)
   paintStatus($)
   if (announce && v.mood !== lastMood) {
-    if (v.mood === 'hungry' || v.mood === 'starving') $.ui.toast(`${v.name} 餓了!`)
-    else if (v.mood === 'dirty') $.ui.toast(`${v.name} 的貓砂盆該清了`)
-    else if (lastMood === 'sleeping' && v.mood !== 'sleeping') $.ui.toast(`${v.name} 睡醒了`)
+    if (v.mood === 'hungry' || v.mood === 'starving') $.ui.toast(current.lines.hungry(v.name))
+    else if (v.mood === 'dirty') $.ui.toast(current.lines.dirty(v.name))
+    else if (lastMood === 'sleeping' && v.mood !== 'sleeping') $.ui.toast(current.lines.woke(v.name))
   }
   lastMood = v.mood
   $.ui.invalidate('ui.render')
@@ -207,7 +224,7 @@ const doingLine = () => {
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'pet', description: '養貓:/pet 開面板,/pet name <名字> 改名' })
+    await $.command.register({ name: 'pet', description: '養貓:/pet 開面板,/pet name <名字> 改名,/pet personality 設定個性' })
     await refresh($, true)
     $.clock.every(TICK_MS, () => refresh($, true))
 
@@ -215,6 +232,18 @@ export const register: Register = on => {
   })
 
   on('command.run', { command: 'pet' }, async ($, e) => {
+    const trait = e.args.match(/^personality(?:\s+(.+))?$/)
+    if (trait) {
+      const rec = await load($)
+      const want = trait[1]?.trim()
+      if (!want) return { text: `${rec.name} 現在是「${personalityOf(rec).label}」。\n${listPersonalities()}\n用 /pet personality <名字> 設定。` }
+      const next = parsePersonality(want)
+      if (!next) return { text: `沒有「${want}」這種個性。\n${listPersonalities()}` }
+      await $.store.set(KEY, setPersonality(rec, next.id, await $.clock.now()))
+      await refresh($, false)
+
+      return { text: `${rec.name} 變成「${next.label}」了:${next.blurb}。` }
+    }
     const name = e.args.match(/^name\s+(.+)$/)?.[1]
     if (name) {
       await $.store.set(KEY, rename(await load($), name))
@@ -270,7 +299,7 @@ export const register: Register = on => {
     await setActivity($, 'working')
     try {
       const out = await next(e)
-      if ('isError' in out && out.isError) await setActivity($, 'startled', 2500)
+      if ('isError' in out && out.isError) await setActivity($, 'startled', current.startleMs)
 
       return out
     } finally {
@@ -299,7 +328,7 @@ export const register: Register = on => {
       inTurn = false
       kittens = 0
       lastTokens = e.usage?.output_tokens ?? 0
-      await setActivity($, e.reason === 'answer' ? 'done' : 'failed', 4000)
+      await setActivity($, e.reason === 'answer' ? 'done' : 'failed', e.reason === 'answer' ? current.celebrateMs : 4000)
     }
 
     return next(e)
@@ -308,7 +337,7 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     try {
       const v = computePet(await load($), await $.clock.now())
-      $.ui.toast(`${v.name} 揮手說掰掰 👋`)
+      $.ui.toast(current.lines.goodbye(v.name))
     } catch {
       // closing anyway
     }
@@ -335,7 +364,7 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text bold>
-          {v.name} · {v.stage === 'egg' ? '紙箱裡' : v.stage === 'baby' ? '幼貓' : '成貓'} · {age(v.ageMs)}
+          {v.name} · {v.stage === 'egg' ? '紙箱裡' : v.stage === 'baby' ? '幼貓' : '成貓'} · {age(v.ageMs)} · {current.label}
         </Text>
         <Box flexDirection="column" marginY={1}>
           {(v.stage === 'egg' ? body(v.stage, v.mood) : scene(anim, v.mood, MARK[shown], kittens)).map(line => (
@@ -358,7 +387,7 @@ export const register: Register = on => {
         </Box>
         <Text dimColor>{doingLine()}</Text>
         <Text dimColor>{note || feedHint}</Text>
-        <Text dimColor>{'指令:/pet 開面板 · /pet name <名字> 改名'}</Text>
+        <Text dimColor>{'指令:/pet 開面板 · /pet name <名字> 改名 · /pet personality 個性'}</Text>
       </Box>
     )
   })

@@ -16,6 +16,19 @@ Answer `y` to add the marketplace, then pick a scope.
 
 - `/pet` opens the pane. Buttons: feed (`f`), play (`p`), clean (`c`).
 - `/pet name <name>` renames your cat.
+- `/pet personality` lists the personalities; `/pet personality <id or label>` sets one:
+
+  | id | label | the cat |
+  | --- | --- | --- |
+  | `normal` | 普通 | the default |
+  | `playful` | 活潑 | runs and jumps a lot, gets bored fast |
+  | `lazy` | 慵懶 | sits and naps, slow to get hungry, dozes off sooner |
+  | `curious` | 好奇 | wanders, watches you type for longer |
+  | `aloof` | 傲嬌 | grooms, ignores your typing, reacts a moment late |
+  | `clingy` | 黏人 | stays near the middle, watches you closely, cheers longer |
+
+  A personality changes how the cat moves, how it reacts to Claude, how fast it gets hungry or
+  bored, and what it says. Switching is free and keeps its current hunger and mood.
 - The cat lives in a small room and moves on its own: it walks, jumps, grooms, stretches,
   scratches, yawns, rolls over, crouches and pounces, chases its tail, and sleeps. Press play
   and it chases a ball. A happy cat does more; a sad or starving one mostly sits.

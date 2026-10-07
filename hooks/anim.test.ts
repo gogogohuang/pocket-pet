@@ -1,5 +1,7 @@
 import { test, expect } from 'claude-code/testing'
 
+import { PERSONALITIES } from './personality'
+import type { PersonalityId } from './personality'
 import { MAX_X, WIDTH, initialAnim, scene, step, throwBall, workPose } from './anim'
 import type { Activity, Anim, StepOptions } from './anim'
 
@@ -108,4 +110,54 @@ test('each running subagent shows a little helper; the scene keeps its width', a
   const lines = scene(initialAnim(), 'happy', '', 2)
   expect(lines.join('\n').match(/=\^[.o]\^=/g)?.length).toBe(2)
   expect(lines.every(l => [...l].length === WIDTH)).toBe(true)
+})
+
+const fnv = (s: string) => {
+  let h = 2166136261
+  for (const c of s) {
+    h ^= c.charCodeAt(0)
+    h = Math.imul(h, 16777619) >>> 0
+  }
+
+  return h
+}
+
+test('normal moves exactly as the cat did before personalities existed', async () => {
+  // Checksums of 600 frames (pose and column) from the 0.6.x implementation, seed 5.
+  const golden = { happy: 2369999755, hungry: 853910121 } as const
+  for (const mood of ['happy', 'hungry'] as const) {
+    const frames = run(initialAnim(), mood, 600, seeded(5), 'idle', { personality: PERSONALITIES.normal })
+    expect(fnv(frames.map(f => `${f.pose}@${f.x}`).join('|'))).toBe(golden[mood])
+  }
+})
+
+const share = (id: PersonalityId, poses: string[], frames = 6000) => {
+  const f = run(initialAnim(), 'happy', frames, seeded(11), 'idle', { personality: PERSONALITIES[id] })
+
+  return f.filter(x => poses.includes(x.pose)).length / frames
+}
+
+test('personalities differ in the direction they claim', async () => {
+  expect(share('playful', ['jump'])).toBeGreaterThan(share('lazy', ['jump']) * 2)
+  expect(share('lazy', ['sit', 'yawn'])).toBeGreaterThan(share('playful', ['sit', 'yawn']) * 2)
+  expect(share('aloof', ['groom'])).toBeGreaterThan(share('normal', ['groom']))
+  expect(share('curious', ['walk'])).toBeGreaterThan(share('normal', ['walk']))
+})
+
+test('a playful cat covers more ground than a lazy one', async () => {
+  const dist = (id: PersonalityId) => {
+    const f = run(initialAnim(), 'happy', 3000, seeded(3), 'idle', { personality: PERSONALITIES[id] })
+
+    return f.reduce((sum, x, i) => sum + Math.abs(x.x - (f[i - 1]?.x ?? x.x)), 0)
+  }
+  expect(dist('playful')).toBeGreaterThan(dist('lazy') * 2)
+})
+
+test('a clingy cat spends its time nearer the middle', async () => {
+  const away = (id: PersonalityId) => {
+    const f = run(initialAnim(), 'happy', 6000, seeded(9), 'idle', { personality: PERSONALITIES[id] })
+
+    return f.reduce((s, x) => s + Math.abs(x.x - MAX_X / 2), 0) / f.length
+  }
+  expect(away('clingy')).toBeLessThan(away('normal'))
 })
