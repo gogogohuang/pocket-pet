@@ -43,3 +43,16 @@ test('every scene line is the arena width', async () => {
     expect(lines.every(l => [...l].length === WIDTH)).toBe(true)
   }
 })
+
+test('a happy cat shows its full repertoire; a sad one only sits', async () => {
+  const poses = new Set(run(initialAnim(), 'happy', 4000).map(f => f.pose))
+  for (const p of ['walk', 'jump', 'groom', 'stretch', 'scratch', 'yawn', 'roll', 'crouch', 'spin'])
+    expect(poses.has(p as never)).toBe(true)
+  const sad = new Set(run(initialAnim(), 'sad', 1000).map(f => f.pose))
+  expect([...sad].every(p => p === 'sit')).toBe(true)
+})
+
+test('a crouch ends in a pounce', async () => {
+  const frames = run({ ...initialAnim(), pose: 'crouch', t: 2 }, 'happy', 6)
+  expect(frames.some(f => f.pose === 'jump')).toBe(true)
+})

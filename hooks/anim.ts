@@ -8,7 +8,7 @@ export const MAX_X = WIDTH - SPRITE_W
 const JUMP = [1, 2, 3, 3, 2, 1, 0] // height per frame of a jump
 const SKY = 4 // rows above the ground
 
-export type Pose = 'walk' | 'sit' | 'jump' | 'sleep' | 'groom'
+export type Pose = 'walk' | 'sit' | 'jump' | 'sleep' | 'groom' | 'stretch' | 'scratch' | 'yawn' | 'roll' | 'crouch' | 'spin'
 export type Mood = 'sleeping' | 'starving' | 'dirty' | 'sad' | 'hungry' | 'happy'
 
 export type Anim = {
@@ -66,16 +66,28 @@ export function step(a: Anim, mood: Mood, rand: () => number): Anim {
       }
       return { ...a, x, dir, t: a.t - 1, frame }
     }
+    if (a.pose === 'spin' && frame % 2 === 0) return { ...a, dir: (a.dir * -1) as 1 | -1, t: a.t - 1, frame }
     return { ...a, t: a.t - 1, frame }
   }
 
+  // a crouch ends in a pounce
+  if (a.pose === 'crouch') return { ...a, pose: 'jump', t: 0, frame }
+
   // pick the next thing to do
   const r = rand()
-  if (mood === 'sad' || mood === 'starving') return { ...a, pose: 'sit', t: 8, frame }
-  if (r < 0.45) return { ...a, pose: 'walk', dir: rand() < 0.5 ? 1 : -1, t: 6 + Math.floor(rand() * 10), frame }
-  if (r < 0.65 && mood === 'happy') return { ...a, pose: 'jump', t: 0, frame }
-  if (r < 0.85) return { ...a, pose: 'groom', t: 6, frame }
-  return { ...a, pose: 'sit', t: 5 + Math.floor(rand() * 5), frame }
+  const happy = mood === 'happy'
+  const rest = (pose: Pose, t: number): Anim => ({ ...a, pose, t, frame })
+  if (mood === 'sad' || mood === 'starving') return rest('sit', 8)
+  if (r < 0.3) return { ...a, pose: 'walk', dir: rand() < 0.5 ? 1 : -1, t: 6 + Math.floor(rand() * 10), frame }
+  if (r < 0.4) return happy ? { ...a, pose: 'jump', t: 0, frame } : rest('sit', 5)
+  if (r < 0.5) return rest('groom', 6)
+  if (r < 0.58) return rest('stretch', 8)
+  if (r < 0.66) return rest('scratch', 8)
+  if (r < 0.74) return rest('yawn', 6)
+  if (r < 0.8) return happy ? rest('roll', 10) : rest('sit', 5)
+  if (r < 0.86) return happy ? rest('crouch', 6) : rest('sit', 5)
+  if (r < 0.92) return happy ? rest('spin', 12) : rest('sit', 5)
+  return rest('sit', 5 + Math.floor(rand() * 5))
 }
 
 const clampX = (x: number) => Math.max(0, Math.min(MAX_X, x))
@@ -111,6 +123,13 @@ function sprite(a: Anim, mood: Mood): string[] {
   if (a.pose === 'sleep') {
     return [pad(''), pad(' ,-.-. '), pad(` (${a.frame % 6 < 3 ? 'z' : 'Z'}_-_) `)]
   }
+  const odd = a.frame % 2 === 1
+  if (a.pose === 'stretch') return [pad('  ___  '), pad(' /   \\ '), pad(`U(${e})U`)]
+  if (a.pose === 'scratch') return [pad(ears), pad(` (${e})${odd ? "'" : ' '}`), pad(odd ? ' U/_\\ ' : ' U\\_/ ')]
+  if (a.pose === 'yawn') return [pad(ears), pad(' (-O-) '), pad(' U U   ')]
+  if (a.pose === 'roll') return [pad(''), pad(odd ? ' u   u ' : '  U U  '), pad('(=^.^=)')]
+  if (a.pose === 'crouch') return [pad(''), pad(ears), pad(odd ? '(o.o)~ ' : '(o.o) ~')]
+  if (a.pose === 'spin') return [pad(ears), pad(face), pad(' U U@ ')]
   const paw = a.pose === 'walk' ? (a.frame % 2 ? '/ \\ /' : '\\ / \\') : a.pose === 'jump' ? '\\_/' : a.pose === 'groom' ? (a.frame % 2 ? 'u u' : 'U u') : 'U U'
   return [pad(ears), pad(face), pad(' ' + paw.padEnd(5) + ' ')]
 }
