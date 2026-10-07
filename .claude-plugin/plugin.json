@@ -1,0 +1,10 @@
+{
+  "name": "pocket-pet",
+  "version": "0.1.0",
+  "description": "A tamagotchi that lives in a Claude Code pane: feed, play, clean; time passes on the real clock.",
+  "types": "./types/index.d.ts",
+  "author": {
+    "name": "gogogohuang"
+  },
+  "license": "MIT"
+}
