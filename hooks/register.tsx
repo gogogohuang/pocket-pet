@@ -40,6 +40,13 @@ const age = (ms: number) => {
   return `${Math.floor(m / 1440)} 天`
 }
 
+const clock = (ms: number) => {
+  const d = new Date(ms)
+  const p = (n: number) => String(n).padStart(2, '0')
+
+  return `${p(d.getHours())}:${p(d.getMinutes())}:${p(d.getSeconds())}`
+}
+
 const summary = (v: PetView) =>
   `${v.stage === 'egg' ? '📦' : v.asleep ? '😴' : v.mood === 'happy' ? '😺' : v.mood === 'sad' || v.mood === 'starving' ? '😿' : '🐱'} ${bar(5 - v.hunger, '🍙', '·')} ${bar(v.happiness, '♥', '♡')}${v.mess ? ' 💩'.repeat(v.mess) : ''}`
 
@@ -120,7 +127,8 @@ export const register: Register = on => {
 
   on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
     const { Box, Text, Button } = $.ui.resolve(e)
-    const v = computePet(await load($), await $.clock.now())
+    const now = await $.clock.now()
+    const v = computePet(await load($), now)
     const note = await read($, msg)
     const feedHint = v.asleep ? '睡覺中' : ''
 
@@ -137,7 +145,9 @@ export const register: Register = on => {
         </Box>
         <Text>飽足 {bar(5 - v.hunger, '■', '□')}</Text>
         <Text>心情 {bar(v.happiness, '♥', '♡')}</Text>
-        <Text dimColor>{v.asleep ? '😴 睡覺中(23:00–07:00)' : '☀️ 清醒中'}</Text>
+        <Text dimColor>
+          🕐 {clock(now)} · {v.asleep ? '😴 睡覺中(23:00–07:00)' : '☀️ 清醒中'}
+        </Text>
         <Box marginTop={1}>
           <Button key="feed" label="餵食" hotkey="f" variant="primary" onPress={() => act($, feed)} />
           <Button key="play" label="玩耍" hotkey="p" onPress={() => act($, play)} />
