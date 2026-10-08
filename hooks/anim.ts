@@ -4,6 +4,8 @@
 
 import { DEFAULT_PERSONALITY } from './personality'
 import type { Personality } from './personality'
+import { SPECIES } from './species'
+import type { SpeciesId } from './species'
 
 export const WIDTH = 30
 export const SPRITE_W = 7
@@ -182,13 +184,32 @@ const EYES: Record<Mood, string> = {
 
 const height = (a: Anim) => (a.pose === 'jump' ? (JUMP[a.t] ?? 0) : 0)
 
-/** The cat as 3 rows, 7 columns wide, facing a.dir. */
-function sprite(a: Anim, mood: Mood): string[] {
+/** What differs between species: the top of the head, the face and tail, the feet. Everything else is shared. */
+const LOOK: Record<SpeciesId, { ears: string; alert: string; face: (dir: 1 | -1, e: string, frame: number) => string; paw: string }> = {
+  cat: { ears: ' /\\_/\\ ', alert: ' /|_|\\ ', face: (d, e) => (d === 1 ? `~(${e})` : `(${e})~`), paw: 'U' },
+  dog: {
+    ears: ' U---U ',
+    alert: ' U|-|U ',
+    face: (d, e, f) => (d === 1 ? `${f % 2 ? '/' : '~'}(${e})` : `(${e})${f % 2 ? '\\' : '~'}`),
+    paw: 'U',
+  },
+  bird: { ears: '  \\|/  ', alert: '  \\|/  ', face: (d, e) => (d === 1 ? ` (${e})>` : `<(${e}) `), paw: 'v' },
+}
+
+/** The pet as 3 rows, 7 columns wide, facing a.dir. */
+function sprite(a: Anim, mood: Mood, species: SpeciesId = 'cat'): string[] {
+  const look = LOOK[species]
+  const lines = cat(a, mood, look)
+
+  return look.paw === 'U' ? lines : lines.map(l => l.replaceAll('U', look.paw))
+}
+
+function cat(a: Anim, mood: Mood, look: (typeof LOOK)[SpeciesId]): string[] {
   const eyes = EYES[a.pose === 'groom' ? 'happy' : mood]
   const blink = a.frame % 12 === 0 && a.pose !== 'sleep'
   const e = blink ? '-.-' : eyes
-  const ears = ' /\\_/\\ '
-  const face = a.dir === 1 ? `~(${e})` : `(${e})~`
+  const ears = look.ears
+  const face = look.face(a.dir, e, a.frame)
   const pad = (s: string) => s.padEnd(SPRITE_W)
   if (a.pose === 'sleep') {
     return [pad(''), pad(' ,-.-. '), pad(` (${a.frame % 6 < 3 ? 'z' : 'Z'}_-_) `)]
@@ -199,9 +220,9 @@ function sprite(a: Anim, mood: Mood): string[] {
     return [pad(tilt + ears.trim()), pad(tilt + `(${e})`), pad(' U U ')]
   }
   if (a.pose === 'talk') return [pad(ears), pad(` (${odd ? '^o^' : '^.^'}) `), pad(' U U ')]
-  if (a.pose === 'scared') return [pad(' /|_|\\ '), pad(' (>O<) '), pad(odd ? '/U U\\' : ' U U  ')]
+  if (a.pose === 'scared') return [pad(look.alert), pad(' (>O<) '), pad(odd ? '/U U\\' : ' U U  ')]
   if (a.pose === 'loaf') return [pad(''), pad(' ,---, '), pad('(=-.-=)')]
-  if (a.pose === 'perk') return [pad(' /|_|\\ '), pad(' (O.O) '), pad(' U U ')]
+  if (a.pose === 'perk') return [pad(look.alert), pad(' (O.O) '), pad(' U U ')]
   if (a.pose === 'read') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [= =] ' : ' [=/=] ')]
   if (a.pose === 'bash') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [$_#] ' : ' [#_$] ')]
   if (a.pose === 'type') return [pad(ears), pad(` (${e}) `), pad(odd ? ' [#_#] ' : ' [_#_] ')]
@@ -217,16 +238,17 @@ function sprite(a: Anim, mood: Mood): string[] {
 
 /** The arena: SKY + 3 rows of cat room, then a ground line. */
 /** `mark` floats above the cat's head: '!' when Claude asks, '♥' when done. */
-export function scene(a: Anim, mood: Mood, mark = '', kittens = 0): string[] {
+export function scene(a: Anim, mood: Mood, mark = '', kittens = 0, species: SpeciesId = 'cat'): string[] {
+  const helper = SPECIES[species].helper
   const rows = Array.from({ length: SKY + 3 }, () => ' '.repeat(WIDTH).split(''))
   const put = (r: number, c: number, s: string) => {
     for (let i = 0; i < s.length; i++) if (c + i >= 0 && c + i < WIDTH && r >= 0 && r < rows.length) rows[r]![c + i] = s[i]!
   }
   // one little helper per running subagent, waving from the right-hand side
-  for (let i = 0; i < Math.min(kittens, 3); i++) put(SKY + 2, WIDTH - 6 - i * 7, (a.frame + i) % 2 ? '=^.^=' : '=^o^=')
+  for (let i = 0; i < Math.min(kittens, 3); i++) put(SKY + 2, WIDTH - 6 - i * 7, helper[(a.frame + i) % 2]!)
   const h = height(a)
   const top = SKY - h
-  sprite(a, mood).forEach((line, i) => put(top + i, a.x, line))
+  sprite(a, mood, species).forEach((line, i) => put(top + i, a.x, line))
   if (mark) put(top - 1, a.x + 3, mark)
   if (a.ball !== null) put(SKY + 2, Math.min(WIDTH - 1, a.ball), '●')
   return [...rows.map(r => r.join('')), '─'.repeat(WIDTH)]

@@ -1,6 +1,6 @@
-# pocket-pet 🐱
+# pocket-pet 🐱🐶🐦
 
-A tamagotchi cat that lives in a Claude Code pane. Feed it, play with it, clean its litter box.
+A tamagotchi pet (cat, dog or bird) that lives in a Claude Code pane. Feed it, play with it, clean up after it.
 Time passes on the real clock, even while Claude Code is closed: it gets hungry, bored and
 sleepy (23:00–07:00 local time) whether you are there or not.
 
@@ -15,7 +15,11 @@ Answer `y` to add the marketplace, then pick a scope.
 ## Use
 
 - `/pet` opens the pane. Buttons: feed (`f`), play (`p`), clean (`c`).
-- `/pet name <name>` renames your cat.
+- `/pet name <name>` renames your pet.
+- `/pet species` lists the kinds; `/pet species <id or label>` switches between `cat` 貓, `dog` 狗 and `bird` 鳥.
+  Only the looks change (sprite, helpers, icons); name, age, hunger and personality stay.
+- `/pet adopt [species] [name]` replaces the pet with a brand-new egg (default: same species, default name).
+  The old pet is gone for good, personality included.
 - `/pet personality` lists the personalities; `/pet personality <id or label>` sets one:
 
   | id | label | the cat |

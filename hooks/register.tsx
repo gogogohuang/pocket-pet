@@ -3,10 +3,12 @@ import type { EngineInterface, Register } from 'claude-code'
 
 import { initialAnim, scene, step, throwBall, workPose } from './anim'
 import type { Activity, Anim } from './anim'
-import { clean, computePet, createPet, feed, play, rename, setPersonality, untilSleepChange } from './pet'
+import { adopt, clean, computePet, createPet, feed, play, rename, setPersonality, setSpecies, untilSleepChange } from './pet'
 import type { Mood, Outcome, PetRecord, PetView, Stage } from './pet'
 import { DEFAULT_PERSONALITY, listPersonalities, parsePersonality, personalityOf } from './personality'
 import type { Personality } from './personality'
+import { DEFAULT_SPECIES, listSpecies, parseSpecies, say, speciesOf } from './species'
+import type { Species } from './species'
 
 const PANE = 'pocket-pet'
 const KEY = 'pet'
@@ -24,8 +26,8 @@ const FACE: Record<Mood, string> = {
   sleeping: '(=-ω-=) zZ',
 }
 
-const body = (stage: Stage, mood: Mood): string[] => {
-  if (stage === 'egg') return ['  _______  ', ' |       | ', ' | 紙 箱 | ', ' |_______| ']
+const body = (stage: Stage, mood: Mood, species: Species = DEFAULT_SPECIES): string[] => {
+  if (stage === 'egg') return species.egg
   const face = FACE[mood]
   if (stage === 'baby') return ['  /\_/\  ', ` ${face} `, '  >   <  ', '  (_" "_)']
 
@@ -55,8 +57,8 @@ const span = (ms: number) => {
   return m >= 60 ? `${Math.floor(m / 60)} 小時 ${m % 60} 分` : `${m} 分`
 }
 
-const summary = (v: PetView) =>
-  `${v.stage === 'egg' ? '📦' : v.asleep ? '😴' : v.mood === 'happy' ? '😺' : v.mood === 'sad' || v.mood === 'starving' ? '😿' : '🐱'} ${bar(5 - v.hunger, '🍙', '·')} ${bar(v.happiness, '♥', '♡')}${v.mess ? ' 💩'.repeat(v.mess) : ''}`
+const summary = (v: PetView, s: Species) =>
+  `${v.stage === 'egg' ? s.icon.egg : v.asleep ? s.icon.asleep : v.mood === 'happy' ? s.icon.happy : v.mood === 'sad' || v.mood === 'starving' ? s.icon.sad : s.icon.normal} ${bar(5 - v.hunger, '🍙', '·')} ${bar(v.happiness, '♥', '♡')}${v.mess ? ' 💩'.repeat(v.mess) : ''}`
 
 let lastMood: Mood | undefined
 let anim: Anim = initialAnim()
@@ -74,6 +76,7 @@ let lastTokens = 0
 let frames = 0
 let typingFrame = -100 // the frame on which the person last edited the prompt
 let current: Personality = DEFAULT_PERSONALITY // the cat's personality as of the last load
+let kind: Species = DEFAULT_SPECIES // and its species
 let changedFrame = 0 // the frame on which what Claude is doing last changed
 let beforeChange: Activity = 'idle'
 
@@ -180,6 +183,7 @@ async function load($: EngineInterface): Promise<PetRecord> {
   const stored = (await $.store.get(KEY)) as PetRecord | undefined
   if (stored) {
     current = personalityOf(stored)
+    kind = speciesOf(stored)
 
     return stored
   }
@@ -192,12 +196,12 @@ async function load($: EngineInterface): Promise<PetRecord> {
 async function refresh($: EngineInterface, announce: boolean) {
   const now = await $.clock.now()
   const v = computePet(await load($), now)
-  lastSummary = summary(v)
+  lastSummary = summary(v, kind)
   paintStatus($)
   if (announce && v.mood !== lastMood) {
-    if (v.mood === 'hungry' || v.mood === 'starving') $.ui.toast(current.lines.hungry(v.name))
-    else if (v.mood === 'dirty') $.ui.toast(current.lines.dirty(v.name))
-    else if (lastMood === 'sleeping' && v.mood !== 'sleeping') $.ui.toast(current.lines.woke(v.name))
+    if (v.mood === 'hungry' || v.mood === 'starving') $.ui.toast(say(kind, current.lines.hungry(v.name)))
+    else if (v.mood === 'dirty') $.ui.toast(say(kind, current.lines.dirty(v.name)))
+    else if (lastMood === 'sleeping' && v.mood !== 'sleeping') $.ui.toast(say(kind, current.lines.woke(v.name)))
   }
   lastMood = v.mood
   $.ui.invalidate('ui.render')
@@ -207,7 +211,7 @@ async function act($: EngineInterface, run: (r: PetRecord, now: number) => Outco
   const now = await $.clock.now()
   const out = run(await load($), now)
   await $.store.set(KEY, out.record)
-  await update($, msg, () => out.message)
+  await update($, msg, () => say(kind, out.message))
   if (run === play && out.ok) anim = throwBall(anim, Math.random)
   await refresh($, false)
 }
@@ -217,14 +221,14 @@ const doingLine = () => {
   if (shown === 'idle') return ''
   const extra =
     shown === 'working' && lastTool ? ` · ${lastTool}` : shown === 'done' && lastTokens ? ` · ${tokens(lastTokens)} tokens` : ''
-  const helpers = kittens ? ` · 🐱×${kittens} 小幫手` : ''
+  const helpers = kittens ? ` · ${kind.icon.normal}×${kittens} 小幫手` : ''
 
   return DOING[shown] + extra + helpers
 }
 
 export const register: Register = on => {
   on('session.start', async ($, e, next) => {
-    await $.command.register({ name: 'pet', description: '養貓:/pet 開面板,/pet name <名字> 改名,/pet personality 設定個性' })
+    await $.command.register({ name: 'pet', description: '養寵物:/pet 開面板,/pet name <名字> 改名,/pet personality 設定個性,/pet species 換種類,/pet adopt 重新領養' })
     await refresh($, true)
     $.clock.every(TICK_MS, () => refresh($, true))
 
@@ -244,6 +248,33 @@ export const register: Register = on => {
 
       return { text: `${rec.name} 變成「${next.label}」了:${next.blurb}。` }
     }
+    const sp = e.args.match(/^species(?:\s+(.+))?$/)
+    if (sp) {
+      const rec = await load($)
+      const want = sp[1]?.trim()
+      if (!want) return { text: `${rec.name} 現在是${speciesOf(rec).label}。\n${listSpecies()}\n用 /pet species <名字> 換種類。` }
+      const next = parseSpecies(want)
+      if (!next) return { text: `沒有「${want}」這種寵物。\n${listSpecies()}` }
+      await $.store.set(KEY, setSpecies(rec, next.id))
+      await refresh($, false)
+
+      return { text: `${rec.name} 變成${next.label}了:${next.blurb}。名字和年紀都沒變。` }
+    }
+    const ad = e.args.match(/^adopt(?:\s+(.+))?$/)
+    if (ad) {
+      const old = await load($)
+      const [first = '', ...more] = (ad[1] ?? '').trim().split(/\s+/)
+      const picked = parseSpecies(first)
+      const species = picked ?? kind
+      const name = (picked ? more : [first, ...more]).join(' ').trim() || species.defaultName
+      await $.store.set(KEY, adopt(await $.clock.now(), species.id, name))
+      anim = initialAnim()
+      kittens = 0
+      lastMood = undefined
+      await refresh($, false)
+
+      return { text: `${old.name} 離開了,領養了新的${species.label}「${name.slice(0, 12)}」,現在是${species.stageNames.egg}的蛋。` }
+    }
     const name = e.args.match(/^name\s+(.+)$/)?.[1]
     if (name) {
       await $.store.set(KEY, rename(await load($), name))
@@ -254,7 +285,7 @@ export const register: Register = on => {
     await $.ui.open({ id: PANE, title: 'Pet' })
     frameTimer ??= $.clock.every(FRAME_MS, () => frame($))
 
-    return { text: '貓咪面板已開啟。' }
+    return { text: '寵物面板已開啟。' }
   })
 
   on('turn.start', async ($, e, next) => {
@@ -337,7 +368,7 @@ export const register: Register = on => {
   on('session.end', async ($, e, next) => {
     try {
       const v = computePet(await load($), await $.clock.now())
-      $.ui.toast(current.lines.goodbye(v.name))
+      $.ui.toast(say(kind, current.lines.goodbye(v.name)))
     } catch {
       // closing anyway
     }
@@ -364,10 +395,10 @@ export const register: Register = on => {
     return (
       <Box flexDirection="column">
         <Text bold>
-          {v.name} · {v.stage === 'egg' ? '紙箱裡' : v.stage === 'baby' ? '幼貓' : '成貓'} · {age(v.ageMs)} · {current.label}
+          {v.name} · {kind.stageNames[v.stage]} · {age(v.ageMs)} · {current.label}
         </Text>
         <Box flexDirection="column" marginY={1}>
-          {(v.stage === 'egg' ? body(v.stage, v.mood) : scene(anim, v.mood, MARK[shown], kittens)).map(line => (
+          {(v.stage === 'egg' ? body(v.stage, v.mood, kind) : scene(anim, v.mood, MARK[shown], kittens, kind.id)).map(line => (
             <Text>{line}</Text>
           ))}
           {v.mess > 0 && <Text>{'💩'.repeat(v.mess)}</Text>}
@@ -387,7 +418,7 @@ export const register: Register = on => {
         </Box>
         <Text dimColor>{doingLine()}</Text>
         <Text dimColor>{note || feedHint}</Text>
-        <Text dimColor>{'指令:/pet 開面板 · /pet name <名字> 改名 · /pet personality 個性'}</Text>
+        <Text dimColor>{'指令:/pet 開面板 · /pet name <名字> 改名 · /pet personality 個性 · /pet species 種類 · /pet adopt 重新領養'}</Text>
       </Box>
     )
   })

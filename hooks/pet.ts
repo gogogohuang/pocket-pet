@@ -1,5 +1,6 @@
 import { personalityOf } from './personality'
 import type { PersonalityId } from './personality'
+import type { SpeciesId } from './species'
 
 // Pure pet logic. The pet is stored as timestamps and meters, never as
 // "current" values; computePet(record, now) derives how it is right now, so
@@ -27,6 +28,8 @@ export type PetRecord = {
   poopAt: number[]
   /** Absent means 'normal'. */
   personality?: PersonalityId
+  /** Absent means 'cat'. */
+  species?: SpeciesId
 }
 
 export type Stage = 'egg' | 'baby' | 'adult'
@@ -96,6 +99,12 @@ export const createPet = (now: number, name = '小貓'): PetRecord => ({
   hunger: { ms: 0, at: now },
   bored: { ms: 0, at: now },
   poopAt: [],
+})
+
+/** A brand-new egg in place of the old pet. Its personality is not kept: a new pet starts normal. */
+export const adopt = (now: number, species: SpeciesId, name: string): PetRecord => ({
+  ...createPet(now, name.trim().slice(0, 12) || '小寵物'),
+  ...(species === 'cat' ? {} : { species }),
 })
 
 export const computePet = (rec: PetRecord, now: number): PetView => {
@@ -194,3 +203,6 @@ export const setPersonality = (rec: PetRecord, id: PersonalityId, now: number): 
     personality: id,
   }
 }
+
+/** Changes the species. Only the looks change: name, age and meters stay as they are. */
+export const setSpecies = (rec: PetRecord, id: SpeciesId): PetRecord => ({ ...rec, species: id })
