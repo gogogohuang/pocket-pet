@@ -64,7 +64,7 @@ let lastMood: Mood | undefined
 let anim: Anim = initialAnim()
 // What Claude is doing. `done`, `failed` and `startled` are brief; the rest last until the next event.
 let activity: Activity = 'idle'
-let shown: Activity = 'idle' // `activity`, or `waiting` once it has gone on for a long time
+let shown: Activity = 'idle' // what the pet displays; follows `activity`
 let activityUntil = 0
 let activityId = 0
 let seenId = -1
@@ -167,8 +167,7 @@ async function frame($: EngineInterface) {
     seenAt = now
     changedFrame = frames
   }
-  const long = (activity === 'working' || activity === 'thinking' || activity === 'speaking') && now - seenAt > p.dozeAfterMs
-  shown = long ? 'waiting' : activity
+  shown = activity // never doze while Claude is still working
   // a cat with lag notices a change in what Claude is doing a few frames late
   const seen = frames - changedFrame < p.lagFrames ? beforeChange : shown
   anim = step(anim, v.mood, Math.random, seen, {
@@ -307,7 +306,8 @@ export const register: Register = on => {
         const c = part.value
         if (!e.agentId && c.kind !== kind && (c.kind === 'thinking' || c.kind === 'text')) {
           kind = c.kind
-          if (activity !== 'asking') void setActivity($, c.kind === 'thinking' ? 'thinking' : 'speaking')
+          // a new response means any earlier permission question has been answered (or denied: no tool.call follows)
+          void setActivity($, c.kind === 'thinking' ? 'thinking' : 'speaking')
         }
       } catch {
         // the cat must never break the stream
@@ -318,7 +318,8 @@ export const register: Register = on => {
 
   on('tool.check', async ($, e, next) => {
     const out = await next(e)
-    if (out.decision === 'ask') await setActivity($, 'asking')
+    // only a real call of the model's: a plugin's `$.tool.check` query carries no tool_use_id and asks nobody
+    if (out.decision === 'ask' && e.tool_use_id) await setActivity($, 'asking')
 
     return out
   })
@@ -359,7 +360,9 @@ export const register: Register = on => {
       inTurn = false
       kittens = 0
       lastTokens = e.usage?.output_tokens ?? 0
-      await setActivity($, e.reason === 'answer' ? 'done' : 'failed', e.reason === 'answer' ? current.celebrateMs : 4000)
+      // the person's own interrupt is not Claude failing
+      if (e.reason === 'aborted') await setActivity($, 'idle')
+      else await setActivity($, e.reason === 'answer' ? 'done' : 'failed', e.reason === 'answer' ? current.celebrateMs : 4000)
     }
 
     return next(e)
